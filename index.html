@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mizan</title>
+    <link rel="stylesheet" href="styles.css">
+    <script type="module" src="app.js"></script>
+</head>
+<body>
+    <div id="intro">
+        <h1>Mizan</h1>
+        <p>Mizan : les cours de l’or et de l’argent en dirhams, mis à jour en continu, avec estimation instantanée de la valeur d’un bijou au gramme. Un outil de lecture simple et fiable</p>
+    </div>
+    <div id="currency-selector">
+        <label for="devise">Choix de devise :</label>
+        <select id="devise">
+            <option value="USD">USD</option>
+            <option value="EUR">EUR</option>
+            <option value="MAD">MAD</option>
+        </select>
+    </div>
+    <div id="cards"></div>
+    <template id="metalTemplate">
+        <div class="metal-card">
+            <h2 class="metal-name"></h2>
+            <p class="metal-price"></p>
+            <p class="metal-update"></p>
+            <p class="metal-variation"></p>
+            <p class="metal-percentage"></p>
+        </div>
+    </template>
+</body>
+</html>
