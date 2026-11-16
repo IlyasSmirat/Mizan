@@ -2,7 +2,18 @@
 const cards = document.getElementById("cards");
 const metalTemplate = document.getElementById("metalTemplate");
 const selectDevise = document.getElementById("devise");
+const selectMetal = document.getElementById("metal-select");
+const selectRange = document.getElementById("range-select");
+const historyChart = document.getElementById("history-chart");
+const poids = document.getElementById("poids");
+const metalEstimateur = document.getElementById("metal-estimateur");
+const resultatEstimation = document.getElementById("resultat-estimation");
 
+const deviseSauvegardee = localStorage.getItem("devise");
+
+if (deviseSauvegardee) {
+    selectDevise.value = deviseSauvegardee;
+}
 
 async function getApi(devise){
     const apiUrl = `https://xaus.com/api/v1/spot?currency=${devise}`;
@@ -65,6 +76,52 @@ async function getPoints(symbole, range){
         
         return data;
 }
+console.log("Canvas:", historyChart, "Context:", historyChart.getContext("2d"));
+
+async function afficherHistorique(){
+    const symbole = selectMetal.value;
+    const range = selectRange.value;
+
+    const data = await getPoints(symbole, range);
+
+    console.log(data.points);
+    const context = historyChart.getContext("2d");
+    context.clearRect(0, 0, historyChart.width, historyChart.height);
+    if (data.points.length === 0) {
+        context.fillText("Aucune donnée disponible", 20, 30);
+        return;
+    }
+    historyChart.width = 600;
+    historyChart.height = 300;
+    const espace = historyChart.width / data.points.length;
+    const prix = data.points.map(point => point.c);
+
+    const prixMin = Math.min(...prix);
+    const prixMax = Math.max(...prix);
+
+    const hauteur = historyChart.height - 40;
+    const difference = prixMax - prixMin;
+    context.beginPath();
+    data.points.forEach((point, index) => {
+        const x = index * espace;
+        const y = difference === 0 ? historyChart.height / 2 : historyChart.height - 20 - ((point.c - prixMin) / difference) * hauteur;
+        if(index === 0){
+            context.moveTo(x, y);
+        }
+        else{
+            context.lineTo(x, y);
+        }
+        if (data.points.length === 1) {
+            context.arc(x, y, 4, 0, Math.PI * 2);
+            context.fill();
+        }
+    });
+    context.stroke();
+}
+selectMetal.addEventListener("change", afficherHistorique);
+selectRange.addEventListener("change", afficherHistorique); 
+afficherHistorique();
+
 
 function afficherVariation(carte, result, fx_rate){
     if(result === null){
@@ -92,6 +149,7 @@ function afficherVariation(carte, result, fx_rate){
 }
 
 const variations = {};
+const prixParGramme = {};
 try {
     const data = await getApi(selectDevise.value);
     const metaux = [
@@ -117,8 +175,10 @@ try {
         carte.querySelector(".metal-update").textContent = "Mise à jour le : " + data.updated_at.split("T")[0] + " " + data.updated_at.split("T")[1].split(".")[0];
         cards.appendChild(clone);
         const historique = await getPoints(metal.symbole, "1mo");
+        prixParGramme[metal.symbole] = metal.prix / 31.1034768;
         const resultat = calculerVariation(historique.points);
-        afficherVariation(carte, resultat, data.fx_rate)
+        variations[metal.symbole] = resultat;
+        afficherVariation(carte, resultat, data.fx_rate);
     }
 } catch (error) {
     alert(error.message);
@@ -127,6 +187,9 @@ try {
 selectDevise.addEventListener("change", async function(){
     try {
         const data = await getApi(selectDevise.value);
+        prixParGramme.xau = data.xau.price / 31.1034768;
+        prixParGramme.silver = (data.silver_usd_oz * data.fx_rate) / 31.1034768;
+        localStorage.setItem("devise", selectDevise.value);
         const carteOr = document.getElementById("xau");
         const carteArgent = document.getElementById("silver");
 
@@ -135,7 +198,28 @@ selectDevise.addEventListener("change", async function(){
 
         carteArgent.querySelector(".metal-price").textContent =
         "Prix : " + data.silver_usd_oz * data.fx_rate + " " + data.xau.currency;
+
+        afficherVariation(carteOr, variations.xau, data.fx_rate);
+        afficherVariation(carteArgent, variations.silver, data.fx_rate);
+        calculerEstimation();
     } catch(error) {
         alert(error.message);
     }
 });
+
+function calculerEstimation() {
+    const valeurPoids = Number(poids.value);
+    const metal = metalEstimateur.value;
+
+    if (poids.value.trim() === "" || !Number.isFinite(valeurPoids) || valeurPoids <= 0) {
+        resultatEstimation.textContent = "Veuillez saisir un poids valide.";
+        return;
+    }
+
+    const prix = valeurPoids * prixParGramme[metal];
+
+    resultatEstimation.textContent =
+        "Estimation : " + prix.toFixed(2) + " " + selectDevise.value;
+}
+poids.addEventListener("input", calculerEstimation);
+metalEstimateur.addEventListener("change", calculerEstimation);
