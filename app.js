@@ -8,6 +8,9 @@ const historyChart = document.getElementById("history-chart");
 const poids = document.getElementById("poids");
 const metalEstimateur = document.getElementById("metal-estimateur");
 const resultatEstimation = document.getElementById("resultat-estimation");
+const statusMessage = document.getElementById("status-message");
+const retryButton = document.getElementById("retry-button");
+let derniereDevise = selectDevise.value;
 
 const deviseSauvegardee = localStorage.getItem("devise");
 
@@ -15,20 +18,57 @@ if (deviseSauvegardee) {
     selectDevise.value = deviseSauvegardee;
 }
 
+function afficherEtat(message, etat) {
+    statusMessage.textContent = message;
+    statusMessage.className = etat;
+
+    retryButton.hidden = etat !== "erreur";
+    retryButton.disabled = etat === "chargement";
+    selectDevise.disabled = etat === "chargement";
+    selectMetal.disabled = etat === "chargement";
+    selectRange.disabled = etat === "chargement";
+}
+
+let typeDerniereRequete = "";
+
 async function getApi(devise){
+    typeDerniereRequete = "api";
+    if(!navigator.onLine){
+        afficherEtat("Vous êtes hors ligne.", "erreur");
+        throw new Error("Vous êtes hors ligne.");
+    }
+    afficherEtat("Chargement...", "chargement");
+    derniereDevise = devise;
     const apiUrl = `https://xaus.com/api/v1/spot?currency=${devise}`;
-    const response = await fetch(apiUrl);
+    let response;
+
+    try {
+        response = await fetch(apiUrl);
+    } catch (error) {
+        afficherEtat("Erreur réseau. Vérifiez votre connexion.", "erreur");
+        throw new Error("Erreur réseau.");
+    }
     if(!response.ok){
-        throw new Error ("API request failed");
+        if(response.status === 429) {
+            afficherEtat("Quota dépassé. Réessayez plus tard.", "erreur");
+        }
+        else if(response.status >= 500) {
+            afficherEtat("Erreur serveur : " + response.status, "erreur");
+        }
+        else{
+            afficherEtat("Erreur client : " + response.status, "erreur");
+        }
+            throw new Error("Erreur HTTP : " + response.status);
     }
     let data;
     try{
         data = await response.json();
     }
     catch(error){
-        throw new Error("Unable to load metal prices. Please try again later.");
+        afficherEtat("Réponse JSON illisible.", "erreur");
+        throw new Error("Réponse JSON illisible.");
     }
-    
+    afficherEtat("Données chargées avec succès", "succes");
     return data;
 }
 
@@ -65,22 +105,58 @@ function calculerVariation(points){
 
 
 async function getPoints(symbole, range){
+    typeDerniereRequete = "historique";
+    afficherEtat("Chargement...", "chargement");
+
+    if(!navigator.onLine){
+        afficherEtat("Vous êtes hors ligne.", "erreur");
+        throw new Error("Vous êtes hors ligne.");
+    }
+
     const url = `https://xaus.com/api/v1/chart?symbol=${symbole}&range=${range}&interval=1d`
 
-    const response = await fetch(url);
+    let response;
+
+    try {
+        response = await fetch(url);
+    }catch (error) {
+        afficherEtat("Erreur réseau. Vérifiez votre connexion.", "erreur");
+        throw new Error("Erreur réseau.");
+    }
     
     if(!response.ok){
-        throw new Error("Chart request failed !");
+        if(response.status === 429) {
+            afficherEtat("Quota dépassé. Réessayez plus tard.", "erreur");
+        }
+        else if(response.status >= 500) {
+            afficherEtat("Erreur serveur : " + response.status, "erreur");
+        }
+        else{
+            afficherEtat("Erreur client : " + response.status, "erreur");
+        }
+            throw new Error("Erreur HTTP : " + response.status);
     }
-        const data = await response.json();
-        
-        return data;
+        let data;
+
+    try{
+        data = await response.json();
+    }catch(error) {
+        afficherEtat("Réponse JSON illisible.", "erreur");
+        throw new Error("Réponse JSON illisible.");
+    }
+    afficherEtat("Données chargées avec succès", "succes");
+    return data;
 }
-console.log("Canvas:", historyChart, "Context:", historyChart.getContext("2d"));
+
+let dernierSymbole = "";
+let dernierRange = "";
 
 async function afficherHistorique(){
     const symbole = selectMetal.value;
     const range = selectRange.value;
+
+    dernierSymbole = symbole;
+    dernierRange = range;
 
     const data = await getPoints(symbole, range);
 
@@ -130,7 +206,7 @@ function afficherVariation(carte, result, fx_rate){
         return;
     }
 
-    const variationConvertie = result.variation * fx_rate;
+    const variationConvertie = (result.variation * fx_rate) / 31.1034768;
     carte.querySelector(".metal-variation").textContent = result.sens === "hausse" ? "↑ " + variationConvertie.toFixed(2) : result.sens === "baisse" ? "↓ " + variationConvertie.toFixed(2) : "→ " + variationConvertie.toFixed(2);
     carte.querySelector(".metal-percentage").textContent = result.pourcentage.toFixed(2) + "%";
 
@@ -171,7 +247,7 @@ try {
         const carte = clone.querySelector(".metal-card");
         carte.id = metal.symbole;
         carte.querySelector(".metal-name").textContent = metal.nom;
-        carte.querySelector(".metal-price").textContent = "Prix : " + metal.prix + " " + metal.devise;
+        carte.querySelector(".metal-price").textContent = "Prix : " + (metal.prix / 31.1034768).toFixed(2) + " " + metal.devise + " /g";
         carte.querySelector(".metal-update").textContent = "Mise à jour le : " + data.updated_at.split("T")[0] + " " + data.updated_at.split("T")[1].split(".")[0];
         cards.appendChild(clone);
         const historique = await getPoints(metal.symbole, "1mo");
@@ -184,6 +260,37 @@ try {
     alert(error.message);
 }
 
+async function reessayerRequete() {
+    const data = await getApi(selectDevise.value);
+    prixParGramme.xau = data.xau.price / 31.1034768;
+    prixParGramme.silver = (data.silver_usd_oz * data.fx_rate) / 31.1034768;
+    const carteOr = document.getElementById("xau");
+    const carteArgent = document.getElementById("silver");
+    carteOr.querySelector(".metal-price").textContent =
+    "Prix : " + (data.xau.price / 31.1034768).toFixed(2) + " " + data.xau.currency + " /g";
+
+    carteArgent.querySelector(".metal-price").textContent =
+    "Prix : " + ((data.silver_usd_oz * data.fx_rate) / 31.1034768).toFixed(2) + " " + data.xau.currency + " /g";
+
+    afficherVariation(carteOr, variations.xau, data.fx_rate);
+    afficherVariation(carteArgent, variations.silver, data.fx_rate);
+
+    calculerEstimation();
+}
+
+retryButton.addEventListener("click", async function() {
+    try {
+        if (typeDerniereRequete === "historique") {
+        await afficherHistorique();
+    }
+    else {
+        await reessayerRequete();
+    }
+    } catch (error) {
+        alert(error.message);
+    }
+});
+
 selectDevise.addEventListener("change", async function(){
     try {
         const data = await getApi(selectDevise.value);
@@ -194,10 +301,10 @@ selectDevise.addEventListener("change", async function(){
         const carteArgent = document.getElementById("silver");
 
         carteOr.querySelector(".metal-price").textContent =
-        "Prix : " + data.xau.price + " " + data.xau.currency;
+        "Prix : " + (data.xau.price / 31.1034768).toFixed(2) + " " + data.xau.currency + " /g";
 
         carteArgent.querySelector(".metal-price").textContent =
-        "Prix : " + data.silver_usd_oz * data.fx_rate + " " + data.xau.currency;
+        "Prix : " + ((data.silver_usd_oz * data.fx_rate) / 31.1034768).toFixed(2) + " " + data.xau.currency + " /g";
 
         afficherVariation(carteOr, variations.xau, data.fx_rate);
         afficherVariation(carteArgent, variations.silver, data.fx_rate);
